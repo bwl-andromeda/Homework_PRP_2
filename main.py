@@ -1,77 +1,48 @@
-import re
-from pprint import pprint
 import csv
+import re
 
-def fix_name(name_str):
-    # разбиваем строку с ФИО на отдельные части
-    name_parts = re.split(r'\s+', name_str.strip())
-    # предполагаем, что в name_parts записаны: Ф И О (возможно неполное)
-    if len(name_parts)==3:
-        return name_parts
-    # неполное ФИО, попробуем восстановить
-    # если возможно, значение пустых полей заполним из следующих записей
-    new_name_parts = [name_parts[0], '', '']
-    if len(name_parts)>=2:
-      new_name_parts[1] = name_parts[1]
-    if len(name_parts)>=3:
-      new_name_parts[2] = name_parts[2]
-    return new_name_parts
+def correct_data(contacts_list):
+    pattern_fio = r'^([а-яёА-ЯЁ]+)(\s*)(,?)([а-яёА-ЯЁ]+)(\s?)(,?)([а-яёА-ЯЁ]*)(,?){1,6}([а-яёА-ЯЁ]*)'
+    new_pattern_fio = r'\1,\4,\7,\9,' 
+    pattern_number = r'(\+7|8)?\s*\(?(\d{3})\)?\s*[-]?(\d{3})\s*[-]?(\d{2})\s*[-]?(\d{2})(\s*)\(?(доб.)?\)?(\s*)(\d{0,4})\)?'
+    new_pattern_number = r'+7(\2)\3-\4-\5\6\7\9'
+    new_contacts_list = []
 
-def fix_phone(phone_str):
-    # убираем все символы, кроме цифр и знака +
-    phone_digits = re.sub(r'\D', '', phone_str)
-    # если номер начинается с 8, заменяем на +7
-    if phone_digits.startswith('8'):
-        phone_digits = '7' + phone_digits[1:]
-    # добавляем форматирование
-    if len(phone_digits) >= 11:
-        phone_formatted = '+7({}){}-{}-{}'.format(phone_digits[1:4], phone_digits[4:7], \
-                                                   phone_digits[7:9], phone_digits[9:11])
-        if len(phone_digits) > 11:
-            phone_formatted += ' доб.{}'.format(phone_digits[11:])
-    else:
-        phone_formatted = phone_str
-    return phone_formatted
+    for page in contacts_list:
+        page_string = ','.join(page)
+        format_page = re.sub(pattern_fio, new_pattern_fio, page_string)
+        format_page_number = re.sub(pattern_number, new_pattern_number, format_page)
+        page_list = format_page_number.split(',')
+        new_contacts_list.append(page_list)
+    
+    return new_contacts_list
 
-def fix_contact(contact):
-    new_contact = contact[:6]
-    # исправляем ФИО
-    new_contact[:3] = fix_name(contact[0])
-    # исправляем телефон и e-mail
-    new_contact.append(fix_phone(contact[5]))
-    new_contact.append(contact[6].lower())
-    return new_contact
 
-with open("phonebook_raw.csv",encoding='utf-8') as f:
-    rows = csv.reader(f, delimiter=",")
-    contacts_list = list(rows)
+def delete_duplicate_data(new_contacts_list):
+    surnames = {}
+    fixed_list = [new_contacts_list[0]]
 
-# Собираем все записи, использовавшие одинаковые номера телефонов/адреса эл. почты
-contacts_dict = {}
-for contact in contacts_list:
-    # пропускаем первую строчку с заголовками
-    if contact[0] == 'lastname':
-        continue
-    # подготавливаем данный контакт
-    new_contact = fix_contact(contact)
-    # проверяем, существует ли у нас контакт с таким же телефоном или адресом эл. почты
-    key = (new_contact[5], new_contact[6])
-    if key in contacts_dict:
-        # если да, обновляем этот контакт с наиболее полной информацией
-        existing_contact = contacts_dict[key]
-        for i in range(6):
-            if existing_contact[i] == '' and new_contact[i] != '':
-                existing_contact[i] = new_contact[i]
-    else:
-        # если нет, сохраняем этот контакт
-        contacts_dict[key] = new_contact
+    for index, row in enumerate(new_contacts_list[1:]):
+        if row[0] not in surnames.keys():
+            surnames[row[0]] = index + 1
+        else:
+            fix_row = new_contacts_list[surnames[row[0]]]
+            for i in range(1, 6):
+                fix_row[i] = fix_row[i] or row[i-1]
 
-# формируем список уникальных контактов
-unique_contacts = list(contacts_dict.values())
+    for index in surnames.values():
+        fixed_list.append(new_contacts_list[index])
+    
+    return fixed_list
 
-# записываем данные в новый файл
-with open("phonebook.csv", "w", newline='',encoding='utf-8') as f:
-    datawriter = csv.writer(f, delimiter=',')
-    datawriter.writerow(['lastname', 'firstname', 'surname', 'organization', \
-                         'position', 'phone', 'email'])
-    datawriter.writerows(unique_contacts)
+
+if __name__ == '__main__':
+    with open("phonebook_raw.csv", encoding='utf-8') as f:
+        rows = csv.reader(f, delimiter=",")
+        contacts_list = list(rows)
+    
+    contacts_new = delete_duplicate_data(correct_data(contacts_list))
+
+    with open("phonebook_new.csv", 'w', encoding='utf-8') as f:
+        datawriter = csv.writer(f, delimiter=",")
+        datawriter.writerows(contacts_new)
